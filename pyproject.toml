@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Static checker for unsafe Piccolo raw SQL construction"
 readme = "README.md"
 license = {text = "MIT"}
+authors = [
+    {name = "atkei"},
+]
 requires-python = ">=3.11,<3.15"
 dependencies = []
 keywords = ["piccolo", "sql", "security", "static-analysis", "linting"]
@@ -27,6 +30,11 @@ classifiers = [
 
 [project.scripts]
 piccolo-sql-guard = "piccolo_sql_guard.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/atkei/piccolo-sql-guard"
+Repository = "https://github.com/atkei/piccolo-sql-guard"
+Issues = "https://github.com/atkei/piccolo-sql-guard/issues"
 
 [project.optional-dependencies]
 dev = [
