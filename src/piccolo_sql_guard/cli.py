@@ -57,7 +57,7 @@ def main() -> None:
     files = enumerate_python_files(paths, config.exclude)
     enum_elapsed = time.perf_counter() - t_enum
 
-    result = run_engine(files, rules, config)
+    result = run_engine(files, rules, config, source_paths=paths)
 
     diagnostics = sorted(
         result.diagnostics,

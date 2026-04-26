@@ -58,6 +58,7 @@ def run_engine(
     files: list[Path],
     rules: list[Rule],
     config: Config,
+    source_paths: list[str] | None = None,
 ) -> EngineResult:
     result = EngineResult()
     builder_allowlist = set(config.builder_allowlist)
@@ -65,7 +66,7 @@ def run_engine(
     site_rules = [r for r in rules if not isinstance(r, ProjectRule)]
     proj_rules = [r for r in rules if isinstance(r, ProjectRule)]
 
-    source_roots = _infer_source_roots(files)
+    source_roots = _infer_source_roots(files, source_paths or [])
     context = _EngineContext(index=ProjectIndex(source_roots=source_roots))
     parse_error_paths: set[Path] = set()
 
@@ -126,27 +127,84 @@ def run_engine(
     return result
 
 
-def _infer_source_roots(files: list[Path]) -> list[Path]:
-    """Derive source roots for both package and namespace-style layouts."""
-    roots: set[Path] = set()
-    max_ancestor_hops = 6
+def _infer_source_roots(
+    files: list[Path],
+    source_paths: list[str] | None = None,
+) -> list[Path]:
+    """Derive source roots from explicit scan paths and package boundaries."""
+    explicit_roots = _roots_from_source_paths(source_paths or [])
+    roots: set[Path] = set(explicit_roots)
+
     for path in files:
         leaf_parent = path.parent.resolve()
-        roots.add(leaf_parent)
 
-        candidate = leaf_parent
-        while (candidate / "__init__.py").exists():
-            candidate = candidate.parent
-        roots.add(candidate)
+        package_root = _package_source_root(path)
+        if package_root is not None:
+            roots.add(package_root)
+        elif not _is_under_any_root(path, explicit_roots):
+            roots.add(leaf_parent)
 
-        cursor = leaf_parent
-        for _ in range(max_ancestor_hops):
-            parent = cursor.parent
-            if parent == cursor:
-                break
-            roots.add(parent)
-            cursor = parent
-    return sorted(roots)
+    return sorted(_safe_source_roots(roots))
+
+
+def _roots_from_source_paths(source_paths: list[str]) -> set[Path]:
+    roots: set[Path] = set()
+    for raw_path in source_paths:
+        path = Path(raw_path)
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved.is_file():
+            roots.add(resolved.parent)
+        elif resolved.is_dir():
+            roots.add(resolved)
+    return roots
+
+
+def _package_source_root(path: Path) -> Path | None:
+    candidate = path.parent.resolve()
+    package_parent: Path | None = None
+    while True:
+        try:
+            is_package = (candidate / "__init__.py").exists()
+        except OSError:
+            break
+        if not is_package:
+            break
+        package_parent = candidate.parent
+        candidate = candidate.parent
+    return package_parent
+
+
+def _is_under_any_root(path: Path, roots: set[Path]) -> bool:
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return False
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _safe_source_roots(roots: set[Path]) -> list[Path]:
+    safe: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        try:
+            resolved = root.resolve()
+            exists = resolved.exists()
+        except OSError:
+            continue
+        if not exists or resolved.parent == resolved or resolved in seen:
+            continue
+        safe.append(resolved)
+        seen.add(resolved)
+    return safe
 
 
 def _ensure_registered_files(
@@ -391,8 +449,12 @@ def _iter_search_roots(index: ProjectIndex) -> list[Path]:
     max_depth = 3
 
     def add_root(path: Path) -> bool:
-        resolved = path.resolve()
-        if resolved not in seen and resolved.exists():
+        try:
+            resolved = path.resolve()
+            exists = resolved.exists()
+        except OSError:
+            return False
+        if resolved not in seen and exists:
             roots.append(resolved)
             seen.add(resolved)
             return True
@@ -406,7 +468,11 @@ def _iter_search_roots(index: ProjectIndex) -> list[Path]:
         except OSError:
             return
         for child in children:
-            if not child.is_dir() or not (child / "__init__.py").exists():
+            try:
+                is_package_dir = child.is_dir() and (child / "__init__.py").exists()
+            except OSError:
+                continue
+            if not is_package_dir:
                 continue
             added = add_root(child)
             if added:

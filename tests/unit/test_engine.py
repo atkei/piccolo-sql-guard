@@ -44,6 +44,48 @@ def test_project_only_scan_reports_parse_errors(tmp_path: Path) -> None:
     assert result.files_scanned == 1
 
 
+def test_source_roots_use_package_boundary(tmp_path: Path) -> None:
+    import piccolo_sql_guard.engine as engine
+
+    src = tmp_path / "src"
+    pkg = src / "app" / "services"
+    pkg.mkdir(parents=True)
+    (src / "app" / "__init__.py").write_text("")
+    (pkg / "__init__.py").write_text("")
+    file_path = pkg / "query.py"
+    file_path.write_text("")
+
+    roots = engine._infer_source_roots([file_path])
+
+    assert roots == [src.resolve()]
+
+
+def test_source_roots_use_scan_path_for_namespace_package(tmp_path: Path) -> None:
+    import piccolo_sql_guard.engine as engine
+
+    src = tmp_path / "src"
+    namespace = src / "app" / "services"
+    namespace.mkdir(parents=True)
+    file_path = namespace / "query.py"
+    file_path.write_text("")
+
+    roots = engine._infer_source_roots([file_path], [str(src)])
+
+    assert roots == [src.resolve()]
+
+
+def test_source_roots_do_not_include_filesystem_root(tmp_path: Path) -> None:
+    import piccolo_sql_guard.engine as engine
+
+    file_path = tmp_path / "query.py"
+    file_path.write_text("")
+
+    roots = engine._infer_source_roots([file_path])
+
+    assert file_path.parent.resolve() in roots
+    assert all(root.parent != root for root in roots)
+
+
 def test_module_analysis_is_shared_between_site_and_project_phases(monkeypatch) -> None:
     import piccolo_sql_guard.engine as engine
 
